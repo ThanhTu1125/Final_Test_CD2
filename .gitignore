@@ -221,3 +221,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ==============================================================================
+# Playwright & Automation Testing Specific (Bắt buộc theo yêu cầu đồ án)
+# ==============================================================================
+# Cấm commit - trừ 0.5 điểm nếu vi phạm
+test-results/
+playwright-report/
+report.html
+storage_state.json
+state.json
+
+# IDE settings
+.vscode/
+.idea/
+
