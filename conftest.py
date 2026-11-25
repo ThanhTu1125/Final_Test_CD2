@@ -17,23 +17,14 @@ def generate_strong_password() -> str:
     """
     Sinh mật khẩu ngẫu nhiên đủ mạnh thỏa mãn Toolshop:
     - Chứa chữ hoa, chữ thường, chữ số, ký tự đặc biệt
-    - Độ dài >= 12 ký tự
+    - Độ dài >= 16 ký tự
     - Tránh các mật khẩu lộ dữ liệu như welcome01, Welcome01!
     """
-    chars = string.ascii_letters + string.digits + "!@#$%^&*"
-    # Đảm bảo có ít nhất 1 chữ hoa, 1 chữ thường, 1 số, 1 ký tự đặc biệt
-    pwd = [
-        secrets.choice(string.ascii_uppercase),
-        secrets.choice(string.ascii_lowercase),
-        secrets.choice(string.digits),
-        secrets.choice("!@#$%^&*"),
-    ]
-    pwd += [secrets.choice(chars) for _ in range(10)]
-    secrets.SystemRandom().shuffle(pwd)
-    return "".join(pwd)
+    token = secrets.token_hex(5)
+    return f"A!9z#{token}T$8mQ"
 
 
-def generate_random_user() -> Dict[str, str]:
+def generate_random_user() -> Dict[str, Any]:
     """Sinh dữ liệu người dùng ngẫu nhiên để đăng ký tài khoản."""
     unique_id = uuid.uuid4().hex[:8]
     return {
@@ -46,7 +37,7 @@ def generate_random_user() -> Dict[str, str]:
         "country": "US",
         "postcode": "55000",
         "phone": f"09{secrets.randbelow(89999999) + 10000000}",
-        "email": f"test_group_{unique_id}@practicesoftwaretesting.com",
+        "email": f"group_test_{unique_id}@testmail.com",
         "password": generate_strong_password(),
     }
 
@@ -97,34 +88,56 @@ def api_request_context(playwright: Playwright, api_url: str) -> Generator[APIRe
 
 
 @pytest.fixture(scope="session")
-def registered_user(api_request_context: APIRequestContext) -> Dict[str, str]:
+def registered_user(api_request_context: APIRequestContext, api_url: str) -> Dict[str, Any]:
     """
     Đăng ký một tài khoản riêng của nhóm qua API đăng ký (Mục 2).
+    Xử lý tương thích môi trường (Mục 1 & 2):
+    - PROD: address là object {'street', 'city', 'state', 'country', 'postal_code'}.
+    - BUGGY: address là chuỗi, city, state, country, postcode tách riêng.
     Scope: session.
     """
     user_data = generate_random_user()
-    try:
-        response = api_request_context.post(
-            "/users/register",
-            data={
-                "first_name": user_data["first_name"],
-                "last_name": user_data["last_name"],
-                "dob": user_data["dob"],
-                "address": user_data["address"],
+    is_buggy = "with-bugs" in api_url or os.getenv("ROUTE_PREFIX", "") != ""
+
+    if is_buggy:
+        payload = {
+            "first_name": user_data["first_name"],
+            "last_name": user_data["last_name"],
+            "dob": user_data["dob"],
+            "address": user_data["address"],
+            "city": user_data["city"],
+            "state": user_data["state"],
+            "country": user_data["country"],
+            "postcode": user_data["postcode"],
+            "phone": user_data["phone"],
+            "email": user_data["email"],
+            "password": user_data["password"],
+        }
+    else:
+        payload = {
+            "first_name": user_data["first_name"],
+            "last_name": user_data["last_name"],
+            "dob": user_data["dob"],
+            "address": {
+                "street": user_data["address"],
                 "city": user_data["city"],
                 "state": user_data["state"],
                 "country": user_data["country"],
-                "postcode": user_data["postcode"],
-                "phone": user_data["phone"],
-                "email": user_data["email"],
-                "password": user_data["password"],
-            }
-        )
-        if response.status in [200, 201]:
-            return user_data
-    except Exception:
-        pass
-    # Fallback dữ liệu nếu API chưa sẵn sàng
+                "postal_code": user_data["postcode"],
+            },
+            "phone": user_data["phone"],
+            "email": user_data["email"],
+            "password": user_data["password"],
+        }
+
+    response = api_request_context.post("/users/register", data=payload)
+    if response.status in [200, 201]:
+        resp_data = response.json()
+        user_data["id"] = resp_data.get("id")
+        return user_data
+    else:
+        print(f"[Warning] Register API failed with status {response.status}: {response.text()}")
+
     return user_data
 
 
