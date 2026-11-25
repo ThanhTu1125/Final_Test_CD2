@@ -16,11 +16,11 @@ class ProductDetailPage(BasePage):
         self.product_description = self.page.get_by_test_id("product-description")
 
         # --- Locators tương tác ---
-        self.quantity_input = self.page.get_by_test_id("quantity")
-        self.btn_increase_quantity = self.page.get_by_test_id("btn-increase-quantity")
-        self.btn_decrease_quantity = self.page.get_by_test_id("btn-decrease-quantity")
-        self.btn_add_to_cart = self.page.get_by_test_id("btn-add-to-cart")
-        self.btn_add_to_favorites = self.page.get_by_test_id("btn-add-to-favorites")
+        self.quantity_input = self.page.get_by_test_id("quantity").or_(self.page.get_by_role("spinbutton", name="Quantity"))
+        self.btn_increase_quantity = self.page.get_by_test_id("increase-quantity").or_(self.page.get_by_role("button", name="Increase quantity"))
+        self.btn_decrease_quantity = self.page.get_by_test_id("decrease-quantity").or_(self.page.get_by_role("button", name="Decrease quantity"))
+        self.btn_add_to_cart = self.page.get_by_test_id("add-to-cart").or_(self.page.get_by_role("button", name="Add to cart"))
+        self.btn_add_to_favorites = self.page.get_by_test_id("add-to-favorites").or_(self.page.get_by_role("button", name="Add to favourites"))
 
         # Thông báo Toast / Alert sau khi thao tác
         self.toast_alert = self.page.locator("div[role='alert'], .toast-message, .alert")

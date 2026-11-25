@@ -45,6 +45,7 @@ class HomePage(BasePage):
         """Thực hiện tìm kiếm sản phẩm theo từ khóa."""
         self.search_input.fill(keyword)
         self.search_button.click()
+        self.page.wait_for_load_state("networkidle")
 
     def reset_search(self) -> None:
         """Reset ô tìm kiếm."""
