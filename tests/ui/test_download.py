@@ -34,9 +34,18 @@ def test_file_download_invoice_triggers_and_verifies_file_size(page: Page, tmp_p
         )
     )
 
-    # Thực hiện kích hoạt sự kiện tải tệp trong trang và bắt sự kiện qua expect_download
+    # Thực hiện kích hoạt sự kiện tải tệp trong trang và bắt sự kiện qua expect_download (tương thích Chromium, Firefox, WebKit)
     with page.expect_download() as download_info:
-        page.evaluate(f"window.location.href = '{download_url}';")
+        page.evaluate(
+            f"""() => {{
+                const a = document.createElement('a');
+                a.href = '{download_url}';
+                a.download = 'sample-invoice-001.pdf';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            }}"""
+        )
 
     download = download_info.value
 

@@ -1,0 +1,164 @@
+name: CI Playwright Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # ============================================================================
+  # JOB 1: Kiểm thử tự động đa trình duyệt trên môi trường chuẩn (PROD / Docker)
+  # Đáp ứng Mục 3.9 (Matrix 3 trình duyệt), Mục 3.10 (Artifacts), Mục 3.11 (Reruns)
+  # ============================================================================
+  e2e-prod-matrix:
+    name: E2E Tests (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+
+    env:
+      SPRINT: sprint5
+      DISABLE_LOGGING: "true"
+      BASE_URL: http://localhost:4200
+      API_URL: http://localhost:8091
+      ROUTE_PREFIX: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright browser (${{ matrix.browser }})
+        run: playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Start local Toolshop Docker container (Bypass Cloudflare blocking)
+        run: |
+          if [ ! -d "toolshop" ]; then
+            git clone --depth 1 https://github.com/testsmith-io/practice-software-testing.git toolshop
+          fi
+          cd toolshop
+          # Bật hiển thị khối Footer Learn & Explore (chứa link GitHub) trên môi trường Docker local
+          sed -i 's/production: false/production: true/g' sprint5/UI/src/environments/environment.ts
+          # Đóng ngay stream SSE /sales-stream để Playwright wait_for_load_state("networkidle") không bị treo 30s
+          sed -i '/sales-stream/,/}/ s/fastcgi_pass laravel-api:9000;/return 204;/' _docker/vhost.conf _docker/vhost.dev.conf || true
+          docker compose -f docker-compose.yml up -d --force-recreate
+          sleep 20
+          docker compose exec -T -u root laravel-api composer install --no-dev --optimize-autoloader --ignore-platform-req=ext-ffi
+          echo "Waiting for MariaDB..."
+          for i in $(seq 1 30); do
+            if docker compose exec -T mariadb mysqladmin ping -h localhost -u root -proot --silent 2>/dev/null; then
+              echo "MariaDB is ready!"
+              break
+            fi
+            sleep 2
+          done
+          docker compose exec -T laravel-api php artisan migrate:refresh --seed
+          echo "Waiting for Laravel API on port 8091..."
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost:8091/status | grep -q "200"; then
+              echo "Laravel API is ready!"
+              break
+            fi
+            sleep 2
+          done
+          echo "Waiting for Angular UI on port 4200..."
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost:4200 | grep -q "200"; then
+              echo "Angular UI is ready!"
+              break
+            fi
+            sleep 5
+          done
+
+      - name: Run Playwright test suite on ${{ matrix.browser }} with rerunfailures
+        run: |
+          pytest \
+            --browser ${{ matrix.browser }} \
+            --reruns 2 \
+            --reruns-delay 2 \
+            --tracing=retain-on-failure \
+            --screenshot=only-on-failure \
+            --html=report-${{ matrix.browser }}.html \
+            --self-contained-html \
+            -v
+
+      - name: Upload HTML Report & Failure Traces/Screenshots (${{ matrix.browser }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts-${{ matrix.browser }}
+          path: |
+            report-${{ matrix.browser }}.html
+            test-results/
+          retention-days: 14
+
+  # ============================================================================
+  # JOB 2: Kiểm thử hồi quy đối soát trên môi trường BUGGY (Săn lỗi hệ thống)
+  # Đáp ứng Mục 3.12 (Chạy nguyên bộ test trên BUGGY với continue-on-error: true)
+  # ============================================================================
+  buggy-regression:
+    name: Regression Hunt on BUGGY Environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+
+    env:
+      BASE_URL: https://with-bugs.practicesoftwaretesting.com
+      API_URL: https://api-with-bugs.practicesoftwaretesting.com
+      ROUTE_PREFIX: /#
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run full regression suite against BUGGY environment
+        continue-on-error: true
+        run: |
+          pytest \
+            --browser chromium \
+            --tracing=retain-on-failure \
+            --screenshot=only-on-failure \
+            --html=report-buggy.html \
+            --self-contained-html \
+            -v
+
+      - name: Upload BUGGY Regression Report, Screenshots & Traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-buggy-regression-artifacts
+          path: |
+            report-buggy.html
+            test-results/
+          retention-days: 14
+

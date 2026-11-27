@@ -44,8 +44,13 @@ class HomePage(BasePage):
     def search_product(self, keyword: str) -> None:
         """Thực hiện tìm kiếm sản phẩm theo từ khóa."""
         self.search_input.fill(keyword)
-        self.search_button.click()
+        try:
+            with self.page.expect_response(lambda r: "/products" in r.url, timeout=8000):
+                self.search_button.click()
+        except Exception:
+            pass
         self.page.wait_for_load_state("networkidle")
+        self.page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
 
     def reset_search(self) -> None:
         """Reset ô tìm kiếm."""
@@ -55,7 +60,12 @@ class HomePage(BasePage):
         """
         Sắp xếp sản phẩm (vd: 'name,asc', 'name,desc', 'price,asc', 'price,desc').
         """
-        self.sort_select.select_option(option_value_or_text)
+        try:
+            with self.page.expect_response(lambda r: "/products" in r.url, timeout=8000):
+                self.sort_select.select_option(option_value_or_text)
+        except Exception:
+            pass
+        self.page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
 
     def filter_by_brand(self, brand_name: str) -> None:
         """Chọn checkbox thương hiệu theo tên."""
@@ -76,10 +86,15 @@ class HomePage(BasePage):
         """
         box = self.price_slider_max_pointer.bounding_box()
         if box:
-            self.page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-            self.page.mouse.down()
-            self.page.mouse.move(box["x"] + box["width"] / 2 + offset_x, box["y"] + box["height"] / 2)
-            self.page.mouse.up()
+            try:
+                with self.page.expect_response(lambda r: "/products" in r.url, timeout=8000):
+                    self.page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                    self.page.mouse.down()
+                    self.page.mouse.move(box["x"] + box["width"] / 2 + offset_x, box["y"] + box["height"] / 2)
+                    self.page.mouse.up()
+            except Exception:
+                pass
+            self.page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
 
     def get_all_product_names(self) -> List[str]:
         """Lấy danh sách tất cả tên sản phẩm đang hiển thị."""

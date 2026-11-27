@@ -48,7 +48,12 @@ class CartPage(BasePage):
 
     def remove_item(self, row_index: int) -> None:
         """Xóa sản phẩm tại dòng row_index."""
-        self.delete_buttons.nth(row_index).click()
+        try:
+            with self.page.expect_response(lambda r: "/carts" in r.url, timeout=8000):
+                self.delete_buttons.nth(row_index).click()
+        except Exception:
+            pass
+        self.page.evaluate("() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))")
 
     def proceed_to_checkout(self) -> None:
         """Bấm nút chuyển sang bước thanh toán (Proceed to checkout)."""
