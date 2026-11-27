@@ -114,6 +114,8 @@ pytest -n auto
 | **MCK-002** | Route/Mocking | Mock API trả về danh sách rỗng | Mock `**/products**` payload `[]` | Giao diện hiển thị vùng trống/no-results. |
 | **MCK-003** | Route/Mocking | Mock API trả về mã lỗi 500 | Mock `**/products**` status 500 | Trang xử lý an toàn không sập trình duyệt. |
 | **DLD-001** | Tải tệp xuống | Tải file PDF hóa đơn (ĐIỂM CỘNG) | Bắt sự kiện expect_download | File lưu thành công, đuôi .pdf, dung lượng > 0 byte. |
+| **DDT-001** | Data-driven UI | Tìm kiếm sản phẩm đa từ khóa từ JSON (Mục 3.3) | `data/search_keywords.json` | Kết quả hiển thị đúng sản phẩm chứa từ khóa tương ứng. |
+| **DDT-002** | Data-driven UI | Gửi form liên hệ đa bộ dữ liệu từ CSV (Mục 3.3) | `data/contact_messages.csv` | Form gửi thành công và hiển thị thông báo alert success. |
 
 ---
 
