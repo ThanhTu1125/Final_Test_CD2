@@ -53,6 +53,10 @@ jobs:
             git clone --depth 1 https://github.com/testsmith-io/practice-software-testing.git toolshop
           fi
           cd toolshop
+          # Bật hiển thị khối Footer Learn & Explore (chứa link GitHub) trên môi trường Docker local
+          sed -i 's/production: false/production: true/g' sprint5/UI/src/environments/environment.ts
+          # Đóng ngay stream SSE /sales-stream để Playwright wait_for_load_state("networkidle") không bị treo 30s
+          sed -i '/sales-stream/,/}/ s/fastcgi_pass laravel-api:9000;/return 204;/' _docker/vhost.conf _docker/vhost.dev.conf || true
           docker compose -f docker-compose.yml up -d --force-recreate
           sleep 20
           docker compose exec -T -u root laravel-api composer install --no-dev --optimize-autoloader --ignore-platform-req=ext-ffi
@@ -65,6 +69,14 @@ jobs:
             sleep 2
           done
           docker compose exec -T laravel-api php artisan migrate:refresh --seed
+          echo "Waiting for Laravel API on port 8091..."
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost:8091/status | grep -q "200"; then
+              echo "Laravel API is ready!"
+              break
+            fi
+            sleep 2
+          done
           echo "Waiting for Angular UI on port 4200..."
           for i in $(seq 1 60); do
             if curl -s -o /dev/null -w "%{http_code}" http://localhost:4200 | grep -q "200"; then

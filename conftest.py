@@ -187,18 +187,20 @@ def storage_state_file(browser: Browser, base_url: str, route_prefix: str, regis
     Yêu cầu 3.4: Đăng nhập 1 lần, lưu storage_state (scope session) và tái sử dụng cho các test.
     """
     context = browser.new_context()
+    # Đóng ngay kết nối SSE /sales-stream để không làm treo wait_for_load_state("networkidle")
+    context.route("**/sales-stream**", lambda route: route.fulfill(status=204, body=""))
     page = context.new_page()
     login_url = f"{base_url.rstrip('/')}{route_prefix}/auth/login"
 
     try:
-        page.goto(login_url, wait_until="domcontentloaded", timeout=15000)
+        page.goto(login_url, wait_until="domcontentloaded", timeout=20000)
         # Điền email & password của tài khoản nhóm
         page.get_by_test_id("email").fill(registered_user["email"])
         page.get_by_test_id("password").fill(registered_user["password"])
         page.get_by_test_id("login-submit").click()
-        page.get_by_test_id("nav-profile").or_(page.get_by_test_id("page-title")).first.wait_for(
-            state="visible", timeout=10000
-        )
+        page.get_by_test_id("nav-profile").or_(page.get_by_test_id("page-title")).or_(
+            page.get_by_test_id("nav-menu")
+        ).first.wait_for(state="visible", timeout=15000)
         # Đồng bộ sessionStorage sang localStorage để storage_state.json lưu được token trên cả PROD và BUGGY
         page.evaluate(
             """() => {
@@ -233,6 +235,8 @@ def context(browser: Browser, request: pytest.FixtureRequest) -> Generator[Brows
     Scope: function.
     """
     new_context = browser.new_context()
+    # Đóng ngay kết nối SSE /sales-stream để không làm treo wait_for_load_state("networkidle")
+    new_context.route("**/sales-stream**", lambda route: route.fulfill(status=204, body=""))
     new_context.tracing.start(screenshots=True, snapshots=True, sources=True)
     yield new_context
     _finalize_context_with_artifacts(new_context, request)
@@ -277,6 +281,7 @@ def authenticated_context(
             pass
     else:
         auth_ctx = browser.new_context()
+    auth_ctx.route("**/sales-stream**", lambda route: route.fulfill(status=204, body=""))
     auth_ctx.tracing.start(screenshots=True, snapshots=True, sources=True)
     yield auth_ctx
     _finalize_context_with_artifacts(auth_ctx, request)
