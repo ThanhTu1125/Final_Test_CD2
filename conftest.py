@@ -1,4 +1,5 @@
 import os
+import json
 import uuid
 import secrets
 import string
@@ -27,9 +28,10 @@ def generate_strong_password() -> str:
 def generate_random_user() -> Dict[str, Any]:
     """Sinh dữ liệu người dùng ngẫu nhiên để đăng ký tài khoản."""
     unique_id = uuid.uuid4().hex[:8]
+    unique_letters = "".join(secrets.choice(string.ascii_lowercase) for _ in range(6))
     return {
         "first_name": "AutoTester",
-        "last_name": f"User{unique_id}",
+        "last_name": f"Tester{unique_letters}",
         "dob": "1995-05-20",
         "address": "456 Automation Road",
         "city": "Da Nang",
@@ -40,6 +42,44 @@ def generate_random_user() -> Dict[str, Any]:
         "email": f"group_test_{unique_id}@testmail.com",
         "password": generate_strong_password(),
     }
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
+    """Lưu kết quả thực thi của từng pha (setup/call/teardown) vào node để chụp ảnh và lưu trace khi lỗi."""
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, f"rep_{rep.when}", rep)
+
+
+def _finalize_context_with_artifacts(ctx: BrowserContext, request: pytest.FixtureRequest) -> None:
+    """Chụp ảnh màn hình và xuất file trace.zip vào test-results/ nếu test case bị lỗi (Mục 3.10 & 3.13)."""
+    rep_call = getattr(request.node, "rep_call", None)
+    rep_setup = getattr(request.node, "rep_setup", None)
+    failed = (rep_call and rep_call.failed) or (rep_setup and rep_setup.failed)
+
+    if failed:
+        safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in request.node.nodeid).strip("-")
+        artifact_dir = os.path.join("test-results", safe_name)
+        os.makedirs(artifact_dir, exist_ok=True)
+        try:
+            if ctx.pages:
+                ctx.pages[-1].screenshot(
+                    path=os.path.join(artifact_dir, "test-failed-1.png"),
+                    full_page=True
+                )
+        except Exception:
+            pass
+        try:
+            ctx.tracing.stop(path=os.path.join(artifact_dir, "trace.zip"))
+        except Exception:
+            pass
+    else:
+        try:
+            ctx.tracing.stop()
+        except Exception:
+            pass
+    ctx.close()
 
 
 # ==============================================================================
@@ -156,7 +196,21 @@ def storage_state_file(browser: Browser, base_url: str, route_prefix: str, regis
         page.get_by_test_id("email").fill(registered_user["email"])
         page.get_by_test_id("password").fill(registered_user["password"])
         page.get_by_test_id("login-submit").click()
-        page.wait_for_timeout(1000)
+        page.get_by_test_id("nav-profile").or_(page.get_by_test_id("page-title")).first.wait_for(
+            state="visible", timeout=10000
+        )
+        # Đồng bộ sessionStorage sang localStorage để storage_state.json lưu được token trên cả PROD và BUGGY
+        page.evaluate(
+            """() => {
+                for (let i = 0; i < window.sessionStorage.length; i++) {
+                    const key = window.sessionStorage.key(i);
+                    const val = window.sessionStorage.getItem(key);
+                    if (key && val && !window.localStorage.getItem(key)) {
+                        window.localStorage.setItem(key, val);
+                    }
+                }
+            }"""
+        )
         context.storage_state(path=STORAGE_STATE_PATH)
     except Exception:
         # Nếu chưa đăng nhập được do site ngoài, tạo file rỗng để không crash
@@ -172,14 +226,16 @@ def storage_state_file(browser: Browser, base_url: str, route_prefix: str, regis
 # ==============================================================================
 
 @pytest.fixture(scope="function")
-def context(browser: Browser) -> Generator[BrowserContext, None, None]:
+def context(browser: Browser, request: pytest.FixtureRequest) -> Generator[BrowserContext, None, None]:
     """
     Fixture tạo mới một BrowserContext sạch cho mỗi test case (Mục 3.4).
+    Tích hợp lưu trace và chụp ảnh màn hình khi test thất bại (Mục 3.10).
     Scope: function.
     """
     new_context = browser.new_context()
+    new_context.tracing.start(screenshots=True, snapshots=True, sources=True)
     yield new_context
-    new_context.close()
+    _finalize_context_with_artifacts(new_context, request)
 
 
 @pytest.fixture(scope="function")
@@ -190,21 +246,40 @@ def page(context: BrowserContext) -> Generator[Page, None, None]:
     """
     new_page = context.new_page()
     yield new_page
-    new_page.close()
 
 
 @pytest.fixture(scope="function")
-def authenticated_context(browser: Browser, storage_state_file: str) -> Generator[BrowserContext, None, None]:
+def authenticated_context(
+    browser: Browser,
+    storage_state_file: str,
+    request: pytest.FixtureRequest
+) -> Generator[BrowserContext, None, None]:
     """
     Yêu cầu 3.4: Mỗi test cần đăng nhập tạo context mới từ file storage_state đã lưu.
+    Tích hợp lưu trace và chụp ảnh màn hình khi test thất bại (Mục 3.10).
     Scope: function.
     """
     if os.path.exists(storage_state_file):
         auth_ctx = browser.new_context(storage_state=storage_state_file)
+        # Khôi phục trực tiếp token từ storage_state.json sang sessionStorage cho môi trường BUGGY
+        try:
+            with open(storage_state_file, "r", encoding="utf-8") as f:
+                state_data = json.load(f)
+            for origin in state_data.get("origins", []):
+                for item in origin.get("localStorage", []):
+                    k, v = item.get("name"), item.get("value")
+                    if k and v:
+                        auth_ctx.add_init_script(
+                            f"window.sessionStorage.setItem({json.dumps(k)}, {json.dumps(v)}); "
+                            f"window.localStorage.setItem({json.dumps(k)}, {json.dumps(v)});"
+                        )
+        except Exception:
+            pass
     else:
         auth_ctx = browser.new_context()
+    auth_ctx.tracing.start(screenshots=True, snapshots=True, sources=True)
     yield auth_ctx
-    auth_ctx.close()
+    _finalize_context_with_artifacts(auth_ctx, request)
 
 
 @pytest.fixture(scope="function")
@@ -215,4 +290,3 @@ def authenticated_page(authenticated_context: BrowserContext) -> Generator[Page,
     """
     auth_page = authenticated_context.new_page()
     yield auth_page
-    auth_page.close()
