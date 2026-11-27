@@ -22,6 +22,13 @@ jobs:
       matrix:
         browser: [chromium, firefox, webkit]
 
+    env:
+      SPRINT: sprint5
+      DISABLE_LOGGING: "true"
+      BASE_URL: http://localhost:4200
+      API_URL: http://localhost:8091
+      ROUTE_PREFIX: ""
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -43,30 +50,31 @@ jobs:
       - name: Start local Toolshop Docker container (Bypass Cloudflare blocking)
         run: |
           if [ ! -d "toolshop" ]; then
-            git clone --depth 1 https://github.com/testsmith-io/practice-software-testing.git toolshop || true
+            git clone --depth 1 https://github.com/testsmith-io/practice-software-testing.git toolshop
           fi
-          if [ -d "toolshop" ] && [ -f "toolshop/docker-compose.yml" ]; then
-            cd toolshop
-            docker compose up -d || true
-            echo "Waiting for local Toolshop services to become ready..."
-            for i in {1..30}; do
-              if curl -s http://localhost:8091/status >/dev/null && curl -s http://localhost:4200 >/dev/null; then
-                echo "Local Toolshop Docker containers are up!"
-                docker compose exec -T laravel-api php artisan migrate:fresh --seed --force || true
-                echo "BASE_URL=http://localhost:4200" >> $GITHUB_ENV
-                echo "API_URL=http://localhost:8091" >> $GITHUB_ENV
-                echo "ROUTE_PREFIX=" >> $GITHUB_ENV
-                break
-              fi
-              sleep 3
-            done
-          fi
+          cd toolshop
+          docker compose -f docker-compose.yml up -d --force-recreate
+          sleep 20
+          docker compose exec -T -u root laravel-api composer install --no-dev --optimize-autoloader --ignore-platform-req=ext-ffi
+          echo "Waiting for MariaDB..."
+          for i in $(seq 1 30); do
+            if docker compose exec -T mariadb mysqladmin ping -h localhost -u root -proot --silent 2>/dev/null; then
+              echo "MariaDB is ready!"
+              break
+            fi
+            sleep 2
+          done
+          docker compose exec -T laravel-api php artisan migrate:refresh --seed
+          echo "Waiting for Angular UI on port 4200..."
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost:4200 | grep -q "200"; then
+              echo "Angular UI is ready!"
+              break
+            fi
+            sleep 5
+          done
 
       - name: Run Playwright test suite on ${{ matrix.browser }} with rerunfailures
-        env:
-          BASE_URL: ${{ env.BASE_URL || 'https://practicesoftwaretesting.com' }}
-          API_URL: ${{ env.API_URL || 'https://api.practicesoftwaretesting.com' }}
-          ROUTE_PREFIX: ${{ env.ROUTE_PREFIX || '' }}
         run: |
           pytest \
             --browser ${{ matrix.browser }} \
@@ -122,6 +130,7 @@ jobs:
         run: playwright install --with-deps chromium
 
       - name: Run full regression suite against BUGGY environment
+        continue-on-error: true
         run: |
           pytest \
             --browser chromium \
